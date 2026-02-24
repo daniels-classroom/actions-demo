@@ -1,4 +1,4 @@
-# actions-demo
+# Actions Demo
 
 A collection of well-commented GitHub Actions workflows designed to introduce
 someone who is completely new to Actions to its core concepts.
