@@ -1,0 +1,51 @@
+# Workflow 2: Greet a Pull Request
+#
+# New concepts introduced:
+#   - pull_request trigger    – fires when a PR is opened, updated, etc.
+#   - Expressions ${{ }}      – embed dynamic values anywhere in the YAML
+#   - github context          – built-in data about the event and repo
+#   - actions/github-script   – lets you call the GitHub API using JavaScript
+#   - permissions block       – grant only the access this workflow needs
+#                               (principle of least privilege)
+
+name: 02 · Greet on Pull Request
+
+on:
+  pull_request:
+    types:
+      - opened   # fire only when a PR is first opened (not on every push)
+
+# Give this workflow write access to pull-request comments,
+# but nothing else.
+permissions:
+  pull-requests: write
+
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1 – log who opened the PR using a GitHub expression
+      - name: Show PR author
+        run: |
+          echo "👤 PR opened by : ${{ github.actor }}"
+          echo "📝 PR title      : ${{ github.event.pull_request.title }}"
+          echo "🔢 PR number     : ${{ github.event.pull_request.number }}"
+
+      # Step 2 – post a welcome comment on the PR using the GitHub API.
+      # 'actions/github-script' is a popular Action that gives you a
+      # pre-authenticated Octokit client inside a JS snippet.
+      - name: Post welcome comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body: `👋 Thanks for opening this pull request, @${context.actor}!\n\n` +
+                    `A maintainer will review it soon. In the meantime, please make sure:\n` +
+                    `- [ ] Your changes are described in the PR description\n` +
+                    `- [ ] All existing tests still pass\n\n` +
+                    `_This comment was posted automatically by a GitHub Actions workflow._`
+            });
