@@ -1,0 +1,125 @@
+# Workflow 5: Scheduled / Cron Workflow
+#
+# New concepts introduced:
+#   - schedule trigger    – run a workflow on a time-based schedule
+#   - Cron syntax         – standard Unix cron expressions
+#   - secrets             – reference encrypted values stored in repo/org settings
+#   - environment         – attach a job to a named deployment environment
+#   - Sending a notification (simulated)
+#
+# Scheduled workflows are ideal for:
+#   • Nightly builds / test runs
+#   • Automated dependency updates
+#   • Periodic health checks or reports
+#   • Cleaning up stale data
+#
+# CRON SYNTAX  (UTC timezone)
+# ┌─────────── minute        (0–59)
+# │ ┌───────── hour          (0–23)
+# │ │ ┌─────── day of month  (1–31)
+# │ │ │ ┌───── month         (1–12)
+# │ │ │ │ ┌─── day of week   (0–6, Sunday = 0)
+# │ │ │ │ │
+# * * * * *
+
+name: 05 · Scheduled Health Check
+
+on:
+  # Run every day at 08:00 UTC (health-check job)
+  # Run every Monday at 08:00 UTC (weekly-report job)
+  schedule:
+    - cron: "0 8 * * *"    # daily
+    - cron: "0 8 * * 1"    # Mondays only
+
+  # Also allow manual runs from the Actions tab
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which environment to check?"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+
+# Security best practice: this workflow doesn't call the GitHub API,
+# so we grant no permissions (empty block = all permissions denied).
+permissions: {}
+
+jobs:
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+
+    # 'environment' links this job to a named environment defined in your
+    # repo settings (Settings → Environments). Environments can have
+    # required reviewers, protection rules, and their own secrets.
+    environment: production
+
+    steps:
+      # Step 1 – determine which environment we're checking
+      - name: Resolve target environment
+        id: env
+        run: |
+          # When triggered by the schedule, use "production".
+          # When triggered manually, use the user-supplied input.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TARGET="${{ github.event.inputs.environment }}"
+          else
+            TARGET="production"
+          fi
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Checking environment: $TARGET"
+
+      # Step 2 – simulate an HTTP health check
+      - name: Run health check
+        run: |
+          TARGET="${{ steps.env.outputs.target }}"
+          echo "🔍 Pinging $TARGET endpoint..."
+          # In a real workflow you might do:
+          #   curl --fail https://my-app.example.com/healthz
+          # We simulate success here.
+          echo "✅ $TARGET is healthy"
+
+      # Step 3 – show how secrets are referenced (the value is never printed)
+      # Secrets are stored encrypted in Settings → Secrets and variables.
+      # Reference them with ${{ secrets.SECRET_NAME }}.
+      # GitHub automatically masks the value in logs.
+      - name: Demonstrate secrets (masked)
+        run: |
+          echo "In a real workflow you would use a secret like this:"
+          echo "  curl -H 'Authorization: Bearer \${{ secrets.API_TOKEN }}' ..."
+          echo "(The actual value is never visible in logs.)"
+
+      # Step 4 – notify on failure using an 'if' condition
+      - name: Notify on failure
+        if: failure()   # ← this step only runs when a previous step failed
+        run: |
+          echo "🚨 Health check FAILED! Sending alert..."
+          # Real notification examples:
+          #   - POST to a Slack webhook stored in secrets.SLACK_WEBHOOK_URL
+          #   - Send an email via a third-party Action
+          #   - Create a GitHub issue with actions/github-script
+
+  # A second job that demonstrates a weekly report pattern
+  weekly-report:
+    name: Weekly Report
+    runs-on: ubuntu-latest
+
+    # Only run this job on Mondays.
+    # When triggered by schedule, github.event.schedule contains the exact
+    # cron string that fired, so we can match it precisely.
+    # For manual runs we always execute it so you can test easily.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '0 8 * * 1'
+
+    steps:
+      - name: Generate weekly summary
+        run: |
+          echo "📊 Weekly summary for week starting $(date '+%Y-%m-%d')"
+          echo "  • Workflow runs this week : (would query the API)"
+          echo "  • Open pull requests      : (would query the API)"
+          echo "  • New issues opened       : (would query the API)"
+          echo "Report complete."

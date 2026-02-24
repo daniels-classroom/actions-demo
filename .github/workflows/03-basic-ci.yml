@@ -1,0 +1,100 @@
+# Workflow 3: Basic Continuous Integration (CI)
+#
+# New concepts introduced:
+#   - actions/checkout          – clone your repo onto the runner
+#   - actions/setup-node        – install a specific Node.js version
+#   - Caching dependencies      – speed up workflows with actions/cache
+#   - Environment variables     – set ENV vars for one step or the whole job
+#   - Job outputs / exit codes  – a failing command automatically fails the job
+#   - Artifacts                 – upload files so you can download them later
+#
+# This workflow simulates a typical Node.js CI pipeline.
+# The same pattern works for Python, Java, Go, Ruby, etc. – just swap
+# the "setup" Action and the commands.
+
+name: 03 · Basic CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Security best practice: grant only what this workflow needs.
+# actions/checkout needs 'contents: read' to clone the repository.
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # You can test against multiple versions of a language using a matrix
+    # (see workflow 04 for a full matrix example).
+    strategy:
+      matrix:
+        node-version: [18, 20]
+
+    # Job-level env vars are available to every step below.
+    env:
+      NODE_ENV: test
+
+    steps:
+      # ── Step 1: Check out the source code ──────────────────────────────
+      # Almost every CI workflow starts with this step.
+      # Without it the runner's workspace is empty.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Step 2: Set up Node.js ─────────────────────────────────────────
+      # 'with:' passes inputs to an Action, like function arguments.
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # ── Step 3: Cache node_modules ─────────────────────────────────────
+      # Caching can cut minutes off your workflow on subsequent runs.
+      # The cache key changes whenever package-lock.json changes,
+      # ensuring a fresh install when dependencies are updated.
+      - name: Cache Node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-${{ matrix.node-version }}-
+
+      # ── Step 4: Install dependencies ───────────────────────────────────
+      # This step is skipped here because the repo has no package.json yet,
+      # but in a real project you would uncomment the line below:
+      # run: npm ci
+      - name: Install dependencies (simulated)
+        run: echo "npm ci  ← would install dependencies from package-lock.json"
+
+      # ── Step 5: Lint ────────────────────────────────────────────────────
+      - name: Lint (simulated)
+        run: echo "npm run lint  ← would check code style"
+
+      # ── Step 6: Build ───────────────────────────────────────────────────
+      - name: Build (simulated)
+        run: |
+          echo "npm run build  ← would compile / bundle the project"
+          mkdir -p dist
+          echo "Build output for Node ${{ matrix.node-version }}" > dist/build.txt
+
+      # ── Step 7: Test ────────────────────────────────────────────────────
+      - name: Run tests (simulated)
+        run: echo "npm test  ← would run the test suite"
+
+      # ── Step 8: Upload build artifact ───────────────────────────────────
+      # Artifacts are files you can download from the Actions UI after the
+      # workflow finishes. Useful for build outputs, test reports, etc.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output-node${{ matrix.node-version }}
+          path: dist/
+          retention-days: 7   # auto-delete after 7 days

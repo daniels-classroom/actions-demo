@@ -1,0 +1,142 @@
+# Workflow 4: Multiple Jobs with Dependencies
+#
+# New concepts introduced:
+#   - Multiple jobs in one workflow
+#   - needs:         – declare that a job must finish before another starts
+#   - if: conditions – run a step/job only when a condition is true
+#   - Job status functions: success(), failure(), always()
+#   - Passing data between jobs with outputs
+#   - Strategy matrix – run the same job across several configurations
+#   - concurrency    – prevent duplicate workflow runs on the same branch
+
+name: 04 · Multi-Job Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Security best practice: grant only what this workflow needs.
+# The build job uses actions/checkout, which requires 'contents: read'.
+permissions:
+  contents: read
+
+# Cancel any in-progress run for the same branch when a new push arrives.
+# This avoids wasting runner minutes on outdated commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Build ───────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    # 'outputs' lets this job share values with downstream jobs.
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: get-version   # give this step an ID so we can reference its outputs
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          echo "Building version $VERSION"
+          # Write to GITHUB_OUTPUT to expose a value to other steps/jobs
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          echo "🔨 Building version ${{ steps.get-version.outputs.version }}..."
+          mkdir -p dist
+          echo "${{ steps.get-version.outputs.version }}" > dist/version.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-dist
+          path: dist/
+
+  # ── Job 2a & 2b: Test matrix ───────────────────────────────────────────
+  # This job runs in parallel across multiple OS / config combinations.
+  # 'needs: build' means it only starts after 'build' succeeds.
+  test:
+    name: Test on ${{ matrix.os }}
+    needs: build          # ← dependency: wait for 'build' to finish
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false    # keep running other matrix legs even if one fails
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-dist
+          path: dist/
+
+      - name: Run tests
+        run: |
+          echo "🧪 Running tests on ${{ matrix.os }}"
+          echo "Testing version: $(cat dist/version.txt)"
+          echo "All tests passed ✅"
+
+  # ── Job 3: Deploy (only on the main branch) ────────────────────────────
+  deploy:
+    name: Deploy
+    needs: test           # ← wait for ALL test matrix legs to finish
+    runs-on: ubuntu-latest
+
+    # Conditional: only deploy when the push is to 'main' (not a PR).
+    # This prevents accidental deploys from feature branches.
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-dist
+          path: dist/
+
+      - name: Deploy
+        run: |
+          echo "🚀 Deploying version $(cat dist/version.txt)..."
+          echo "   (In a real workflow you would push to a server, "
+          echo "    cloud provider, or container registry here.)"
+          echo "Deploy complete ✅"
+
+  # ── Job 4: Notify (always runs, even on failure) ───────────────────────
+  notify:
+    name: Notify
+    needs: [build, test, deploy]
+    runs-on: ubuntu-latest
+
+    # 'always()' ensures this job runs regardless of upstream results,
+    # including when 'deploy' is skipped (e.g. on a feature branch).
+    # Without always(), a skipped 'deploy' job would also cause this job
+    # to be skipped even though build and test ran fine.
+    if: always()
+
+    steps:
+      - name: Report pipeline result
+        run: |
+          echo "Pipeline finished."
+          echo "  build  → ${{ needs.build.result }}"
+          echo "  test   → ${{ needs.test.result }}"
+          echo "  deploy → ${{ needs.deploy.result }}"
+
+          # Use job status functions to decide what to report
+          if [[ "${{ needs.build.result }}" == "success" && \
+                "${{ needs.test.result }}"  == "success" ]]; then
+            echo "✅ All critical jobs passed!"
+          else
+            echo "❌ One or more critical jobs failed."
+            exit 1
+          fi
